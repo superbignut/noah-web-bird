@@ -1,0 +1,9 @@
+[workspace]
+
+# 配置解析器的版本
+resolver = "2" 
+
+members = [
+    "libs/*",
+
+]
