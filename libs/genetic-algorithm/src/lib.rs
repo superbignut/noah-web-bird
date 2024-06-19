@@ -1,18 +1,18 @@
 mod chromosome;
 mod crossover;
 mod individual;
-mod selection;
 mod mutation;
+mod selection;
 
 use rand::{seq::SliceRandom, Rng, RngCore};
 
 pub use self::chromosome::*;
 pub use self::crossover::*;
 pub use self::individual::*;
-pub use self::selection::*;
 pub use self::mutation::*;
+pub use self::selection::*;
 /*
-    
+
 */
 
 pub struct GeneticAlgorithm<S> {
@@ -27,14 +27,17 @@ impl<S> GeneticAlgorithm<S> {
         T: Individual,
         S: SelectionMethod,
     {
-        assert!(population.is_empty());
+        // 总体逻辑为，随机选择两个 Individual 杂交生成新的 Chromosome
+        // 适当的突变
+        // 生成新的
+        assert!(!population.is_empty());
         (0..population.len())
             .map(|_| {
                 let parent_a = self.selection_method.select(rng, population).chromosome();
                 let parent_b = self.selection_method.select(rng, population).chromosome();
                 let mut child = self.crossover_method.crossover(rng, parent_a, parent_b);
                 self.mutation_method.mutate(rng, &mut child);
-                
+
                 T::create(child)
             })
             .collect()
@@ -43,17 +46,15 @@ impl<S> GeneticAlgorithm<S> {
     pub fn new(
         selection_method: S,
         crossover_method: impl CrossoverMethod + 'static,
-        mutation_method: impl MutationMethod + 'static
+        mutation_method: impl MutationMethod + 'static,
     ) -> Self {
-        Self { 
-            selection_method, 
+        Self {
+            selection_method,
             crossover_method: Box::new(crossover_method),
-            mutation_method: Box::new(mutation_method)
+            mutation_method: Box::new(mutation_method),
         }
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -63,25 +64,83 @@ mod tests {
     use std::collections::BTreeMap;
     use std::iter::FromIterator;
 
-    struct TestIndividual {
-        fitness: f32,
+    #[derive(Clone, Debug, PartialEq)]
+    enum TestIndividual {
+        WithChromosome { chromosome: Chromosome },
+        WithFitness { fitness: f32 },
     }
     impl TestIndividual {
         fn new(fitness: f32) -> Self {
-            Self { fitness }
+            Self::WithFitness  { fitness }
         }
     }
 
     impl Individual for TestIndividual {
         fn fitness(&self) -> f32 {
-            self.fitness
+            match self {
+                Self::WithChromosome { chromosome } => {
+                    // 染色体的求和是fitness
+                    chromosome.iter().sum()
+                }
+                Self::WithFitness { fitness } => *fitness
+            }
         }
         fn chromosome(&self) -> &Chromosome {
-            todo!()
+            match self {
+                Self::WithChromosome { chromosome } => return chromosome,
+                Self::WithFitness { fitness } => {
+                    panic!("error withFitness")
+                }
+            }
         }
-        fn create(chromosome: Chromosome)-> Self {
-            todo!()
+        fn create(chromosome: Chromosome) -> Self {
+            Self::WithChromosome { chromosome }
+
         }
+    }
+    #[test]
+    fn genetic_algorithm() {
+
+        fn individual(genes: &[f32]) -> TestIndividual {
+            TestIndividual::create(genes.iter().cloned().collect())
+        }
+
+        let mut rng = ChaCha8Rng::from_seed(Default::default());
+
+
+        // 这里直接用unit-like-struct作为参数，都不需要创建实例的
+        let ga = GeneticAlgorithm::new(
+            RouletteWheelSelection,
+            UniformCrossover,
+            GaussianMutation::new(0.5, 0.5),
+        );
+
+        let mut population = vec![
+            individual(&[0.0, 0.0, 0.0]),
+            individual(&[1.0, 1.0, 1.0]),
+            individual(&[1.0, 2.0, 1.0]),
+            individual(&[1.0, 2.0, 4.0]),
+        ];
+        
+        // We're running `.evolve()` a few times, so that the differences between the
+        // input and output population are easier to spot.
+        //
+        // No particular reason for a number of 10 - this test would be fine for 5, 20 or
+        // even 1000 generations - the only thing that'd change is the magnitude of the
+        // difference between the populations.
+        for _ in 0..10 {
+            population = ga.evolve(&mut rng, &population);
+            dbg!(population.len());
+        }
+
+        let expected_population = vec![
+            individual(&[0.44769490, 2.0648358, 4.3058133]),
+            individual(&[1.21268670, 1.5538777, 2.8869110]),
+            individual(&[1.06176780, 2.2657390, 4.4287640]),
+            individual(&[0.95909685, 2.4618788, 4.0247330]),
+        ];
+
+        assert_eq!(population, expected_population);
     }
 
     #[test]
@@ -120,7 +179,6 @@ mod tests {
         assert_eq!(actual_histogram, expected_histogram);
     }
 
-
     #[test]
     fn uniform_crossover() {
         let mut rng = ChaCha8Rng::from_seed(Default::default());
@@ -128,30 +186,28 @@ mod tests {
         let parent_b: Chromosome = (1..=100).map(|n| -n as f32).collect();
         let child = UniformCrossover.crossover(&mut rng, &parent_a, &parent_b);
 
-        let diff_a = child.iter().zip(parent_a).filter(|(c,p)| *c != p).count();
-        let diff_b = child.iter().zip(parent_b).filter(|(c,p)| *c != p).count();
+        let diff_a = child.iter().zip(parent_a).filter(|(c, p)| *c != p).count();
+        let diff_b = child.iter().zip(parent_b).filter(|(c, p)| *c != p).count();
         dbg!(diff_a, diff_b);
         assert_eq!(diff_a, 49);
         assert_eq!(diff_b, 51);
     }
 
-
-
     #[cfg(test)]
     mod tests {
-        
+
         mod gaussian_mutation {
+            use super::super::{GaussianMutation, MutationMethod};
             use super::*;
             use rand::SeedableRng;
             use rand_chacha::ChaCha8Rng;
-            use super::super::{GaussianMutation, MutationMethod};
 
             fn actual(chance: f32, coeff: f32) -> Vec<f32> {
                 let mut rng = ChaCha8Rng::from_seed(Default::default());
                 let mut child = vec![1.0, 2.0, 3.0, 4.0, 5.0].into_iter().collect();
-    
+
                 GaussianMutation::new(chance, coeff).mutate(&mut rng, &mut child);
-    
+
                 child.into_iter().collect()
             }
             mod given_zero_chance {

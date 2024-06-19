@@ -25,7 +25,7 @@ impl MutationMethod for GaussianMutation {
             let sign = if rng.gen_bool(0.5){-1.0} else {1.0};
 
             if rng.gen_bool(self.chance as f64) {
-                *gene += sign * self.coeff * rng.gen::<f32>();
+                *gene += sign * self.coeff * rng.gen::<f32>();//[0,1)
             }
         }
     }
